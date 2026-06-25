@@ -1,2 +1,2 @@
-# KeyLogger
-Simple keylogger :-)
+# WZC
+Projekt na zaliczenie przedmiotu Wybrane zagadnienia cyberbezpieczeństwa

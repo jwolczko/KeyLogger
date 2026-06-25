@@ -1,0 +1,184 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+	<Package Name="TheGame"
+			 Manufacturer="E-Corp"
+			 Version="1.0.0"
+			 UpgradeCode="B04DABE6-6EF1-4DAB-9C57-B1DCF35BF49F">
+
+		<MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+		<MediaTemplate EmbedCab="yes" />
+		
+		<StandardDirectory Id="ProgramFiles64Folder">
+			<Directory Id="INSTALLFOLDER" Name="The Game">
+			</Directory>
+		</StandardDirectory>
+
+		<!-- Menu Start -->
+		<StandardDirectory Id="ProgramMenuFolder">
+			<Directory Id="ProgramMenuTheGame" Name="The Game" />
+		</StandardDirectory>
+
+		<Feature Id="MainFeature" Title="Surprise Suite" Level="1">
+			<ComponentGroupRef Id="GameFiles" />
+
+			<ComponentRef Id="GameStartMenuShortcut" />
+			<ComponentRef Id="SurpriseAutostart" />
+		</Feature>
+
+		<!-- =========================
+         Uruchom Surprise po instalacji
+         (tylko dla świeżej instalacji)
+         ========================= -->
+		<SetProperty Id="WixShellExecTarget"
+					 Value="&quot;[INSTALLFOLDER]Surprise.exe&quot;"
+					 Before="LaunchSurprise"
+					 Sequence="execute" />
+
+		<CustomAction Id="LaunchSurprise"
+					  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+					  DllEntry="WixShellExec"
+					  Execute="immediate"
+					  Return="check" />
+
+		<InstallExecuteSequence>
+			<Custom Action="LaunchSurprise"
+					After="InstallFinalize"
+					Condition="NOT Installed" />
+		</InstallExecuteSequence>
+
+	</Package>
+
+	<Fragment>
+		<ComponentGroup Id="GameFiles" Directory="INSTALLFOLDER">
+			<!-- Game.exe -->
+			<Component Id="cmp_GameExe" Guid="*">
+				<File Source="$(var.Game.TargetPath)" KeyPath="yes" />
+			</Component>
+
+			<!-- DLL-e (po 1 na komponent) -->
+			<Component Id="cmp_concrt140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\concrt140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_libomp140" Guid="*">
+				<File Source="$(var.Game.TargetDir)\libomp140.x86_64.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_libomp140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\libomp140d.x86_64.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_mfc140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\mfc140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_mfc140ud" Guid="*">
+				<File Source="$(var.Game.TargetDir)\mfc140ud.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_mfcm140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\mfcm140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_mfcm140ud" Guid="*">
+				<File Source="$(var.Game.TargetDir)\mfcm140ud.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_msvcp140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\msvcp140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_msvcp140d_atomic_wait" Guid="*">
+				<File Source="$(var.Game.TargetDir)\msvcp140d_atomic_wait.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_msvcp140d_codecvt_ids" Guid="*">
+				<File Source="$(var.Game.TargetDir)\msvcp140d_codecvt_ids.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_msvcp140_1d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\msvcp140_1d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_msvcp140_2d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\msvcp140_2d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_ucrtbased" Guid="*">
+				<File Source="$(var.Game.TargetDir)\ucrtbased.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_vcamp140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\vcamp140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_vccorlib140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\vccorlib140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_vcomp140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\vcomp140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_vcruntime140d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\vcruntime140d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_vcruntime140_1d" Guid="*">
+				<File Source="$(var.Game.TargetDir)\vcruntime140_1d.dll" KeyPath="yes" />
+			</Component>
+
+			<Component Id="cmp_vcruntime140_threadsd" Guid="*">
+				<File Source="$(var.Game.TargetDir)\vcruntime140_threadsd.dll" KeyPath="yes" />
+			</Component>
+			
+			<Component Id="cmp_Surprise_exe" Guid="*">
+				<File Source="$(var.Surprise.TargetPath)" KeyPath="yes" />
+			</Component>
+		</ComponentGroup>
+	</Fragment>	
+
+	<!-- =========================================================
+       Skrót Game w Menu Start
+       ========================================================= -->
+	<Fragment>
+		<Component Id="GameStartMenuShortcut"
+				   Directory="ProgramMenuTheGame"
+				   Guid="*">
+
+			<Shortcut Id="GameShortcut"
+					  Name="Game"
+					  Description="Launch Game"
+					  Target="[INSTALLFOLDER]Game.exe"
+					  WorkingDirectory="INSTALLFOLDER" />
+
+			<RemoveFolder Id="RemoveProgramMenuTheGame" On="uninstall" />
+
+			<RegistryValue Root="HKCU"
+						   Key="Software\Jakub\TheGame"
+						   Name="GameShortcutInstalled"
+						   Type="integer"
+						   Value="1"
+						   KeyPath="yes" />
+		</Component>
+	</Fragment>
+
+	<!-- =========================================================
+       Autostart Surprise (HKCU Run)
+       ========================================================= -->
+	<Fragment>
+		<Component Id="SurpriseAutostart"
+				   Directory="INSTALLFOLDER"
+				   Guid="*">
+			<RegistryValue Root="HKCU"
+						   Key="Software\Microsoft\Windows\CurrentVersion\Run"
+						   Name="SurpriseSuiteSurprise"
+						   Type="string"
+						   Value="&quot;[INSTALLFOLDER]Surprise.exe&quot;"
+						   KeyPath="yes" />
+		</Component>
+	</Fragment>
+
+</Wix>

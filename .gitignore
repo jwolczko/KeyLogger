@@ -21,8 +21,6 @@
 *.so
 *.dylib
 *.dll
-*.so.*
-
 
 # Fortran module files
 *.mod
@@ -39,31 +37,114 @@
 *.out
 *.app
 
-# Build directories
-build/
-Build/
-build-*/
-
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
-
-# Temporary files
-*.tmp
-*.log
-*.bak
-*.swp
-
-# vcpkg
-vcpkg_installed/
-
 # debug information files
 *.dwo
 
-# test output & cache
+
+# ============================
+# Visual Studio – pliki użytkownika / cache
+# ============================
+.vs/
+*.user
+*.userosscache
+*.suo
+*.vcxproj.user
+*.sln.docstates
+
+# ============================
+# Katalogi buildów C++ (Debug/Release itd.)
+# ============================
+# standardowe
+[Bb]uild/
+[Bb]in/
+[Oo]bj/
+
+# typowe konfiguracje VS
+Debug/
+DebugPublic/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+x64/
+x86/
+ARM/
+ARM64/
+
+# out-of-source builds np. CMake
+[Cc]MakeFiles/
+CMakeCache.txt
+CMakeScripts/
+CMakeFiles/
 Testing/
-.cache/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+
+# ============================
+# Pliki wynikowe C/C++ (binarne)
+# ============================
+# biblioteki / binarki
+*.obj
+*.pch
+*.pdb
+*.idb
+*.lib
+*.dll
+*.exe
+*.exp
+*.ilk
+*.iobj
+*.ipdb
+
+# pliki tymczasowe linkera / kompilatora
+*.log
+*.tlog
+*.lastbuildstate
+*.cachefile
+*.rsp
+
+# ============================
+# Visual C++ IntelliSense / bazy
+# ============================
+*.ipch
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+
+# ============================
+# Visual Studio Installer Project – output
+# (zostawiamy .vdproj w repo, ignorujemy tylko wyniki buildów)
+# ============================
+# paczki instalacyjne
+*.msi
+*.msm
+*.msp
+*.cab
+
+# typowe foldery wyjściowe setupów
+[Ss]etup/
+[Ii]nstaller/
+[Oo]utput/
+[Oo]fflineInstaller/
+[Dd]ist/
+
+# pliki user-specyficzne od instalera
+*.vdproj.user
+
+# ============================
+# Inne śmieci systemowe
+# ============================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# VS Code (jeśli nie chcesz w repo)
+.vscode/
+
+# backup / tymczasowe
+*.tmp
+*.bak
+*.log
+~$*
