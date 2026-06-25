@@ -1,4 +1,4 @@
-# WZC - Cybersecurity Course Project
+# Surprise - Cybersecurity Course Project
 
 This repository contains a Windows desktop project prepared for the "Selected Topics in Cybersecurity" course. The solution demonstrates a visible WinAPI game application together with a background component that records keyboard input for educational analysis of Windows hooks, persistence mechanisms, buffering, and file output.
 
